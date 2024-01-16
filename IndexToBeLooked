@@ -1,4 +1,4 @@
- ORDER BY avg_fragmentation_in_percent DESC;
+
 -- Query to generate dynamic SQL statements for index maintenance
 SELECT
     dbschemas.[name] AS 'SchemaName',
