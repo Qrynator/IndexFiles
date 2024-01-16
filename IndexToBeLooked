@@ -1,0 +1,45 @@
+ ORDER BY avg_fragmentation_in_percent DESC;
+-- Query to generate dynamic SQL statements for index maintenance
+SELECT
+    dbschemas.[name] AS 'SchemaName',
+    dbtables.[name] AS 'TableName',
+    dbindexes.[name] AS 'IndexName',
+    indexstats.avg_fragmentation_in_percent,
+    indexstats.page_count,
+    CASE
+        WHEN indexstats.avg_fragmentation_in_percent > 30 AND indexstats.page_count > 1000 THEN 'REBUILD'
+        WHEN indexstats.avg_fragmentation_in_percent < 10 AND indexstats.page_count < 1000 THEN 'REORGANIZE'
+        ELSE NULL
+    END AS 'MaintenanceAction',
+    CASE
+        WHEN indexstats.avg_fragmentation_in_percent > 30 AND indexstats.page_count > 1000 THEN 'WITH (FILLFACTOR = 80, SORT_IN_TEMPDB = ON, STATISTICS_NORECOMPUTE = OFF)'
+        WHEN indexstats.avg_fragmentation_in_percent < 10 AND indexstats.page_count < 1000 THEN NULL -- REORGANIZE does not have additional WITH options
+        ELSE NULL
+    END AS 'MaintenanceOptions'
+INTO #temp1
+FROM
+    sys.dm_db_index_physical_stats(DB_ID(), NULL, NULL, NULL, 'SAMPLED') indexstats
+INNER JOIN
+    sys.tables dbtables ON dbtables.[object_id] = indexstats.[object_id]
+INNER JOIN
+    sys.schemas dbschemas ON dbtables.[schema_id] = dbschemas.[schema_id]
+INNER JOIN
+    sys.indexes AS dbindexes ON dbindexes.[object_id] = indexstats.[object_id]
+    AND indexstats.index_id = dbindexes.index_id
+WHERE
+    indexstats.database_id = DB_ID()
+ORDER BY
+    indexstats.avg_fragmentation_in_percent DESC;
+
+-- Generate dynamic SQL statements
+SELECT distinct
+    'ALTER INDEX [' + IndexName + '] ON [' + DB_NAME() + '].[' + SchemaName + '].[' + TableName + '] ' +
+    MaintenanceAction + ' ' +
+    ISNULL(MaintenanceOptions, '')
+FROM
+    #temp1
+WHERE
+    MaintenanceAction IS NOT NULL and indexname is not null;
+
+-- Drop the temporary table when done
+DROP TABLE #temp1;
